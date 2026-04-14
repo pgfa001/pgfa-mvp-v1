@@ -18,7 +18,7 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.UUID
 
-fun main(args: Array<String>) {
+fun main() {
     embeddedServer(Netty, port = System.getenv("PORT")?.toInt() ?: SERVER_PORT, host = "0.0.0.0", module = Application::module)
         .start(wait = true)
 }
