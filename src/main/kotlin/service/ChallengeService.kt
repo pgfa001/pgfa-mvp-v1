@@ -28,11 +28,14 @@ import com.provingground.datamodels.response.CreateChallengeSubmissionRequest
 import com.provingground.datamodels.response.CreateChallengeSubmissionResponse
 import com.provingground.datamodels.response.CreateChallengeSubmissionUploadUrlRequest
 import com.provingground.datamodels.response.CreateChallengeSubmissionUploadUrlResponse
+import com.provingground.datamodels.response.CurrentChallengeLeaderboardResponse
+import com.provingground.datamodels.response.FullLeaderboardEntryResponse
 import com.provingground.datamodels.response.GetChallengeDemoVideoUrlResponse
 import com.provingground.datamodels.response.GetChallengeReviewSubmissionsResponse
 import com.provingground.datamodels.response.GetChallengesCmsResponse
 import com.provingground.datamodels.response.GetMyChallengeSubmissionsResponse
 import com.provingground.datamodels.response.LeaderboardEntryResponse
+import com.provingground.datamodels.response.LeaderboardScope
 import com.provingground.datamodels.response.VerifyChallengeSubmissionResponse
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -1035,6 +1038,133 @@ class ChallengeService(
             videoUrl = readUrl.readUrl,
             expiresAt = readUrl.expiresAt
         )
+    }
+
+    suspend fun getCurrentChallengeLeaderboard(
+        actingUserId: UUID,
+        scope: String?,
+        teamId: String?
+    ): CurrentChallengeLeaderboardResponse = newSuspendedTransaction(Dispatchers.IO) {
+        val actingUser = usersRepository.getByIdTx(actingUserId)
+            ?: throw IllegalArgumentException("User not found")
+
+        val requestedScope = when (scope?.uppercase()) {
+            null, "", "CLUB" -> LeaderboardScope.CLUB
+            "TEAM" -> LeaderboardScope.TEAM
+            else -> throw IllegalArgumentException("Invalid leaderboard scope")
+        }
+
+        val userClubs = clubsRepository.getClubsForUserTx(actingUser.id)
+
+        val club = userClubs.firstOrNull()
+            ?: throw IllegalArgumentException("User is not assigned to a club")
+
+        val challenge = challengesRepository.getCurrentChallengeForClubTx(club.id)
+            ?: throw IllegalArgumentException("No active challenge found for club")
+
+        val teamsForClub = teamsRepository.getByClubIdTx(club.id)
+        val teamsById = teamsForClub.associateBy { it.id }
+
+        val selectedTeam = if (requestedScope == LeaderboardScope.TEAM) {
+            val parsedTeamId = if (!teamId.isNullOrBlank()) {
+                UUID.fromString(teamId)
+            } else {
+                teamsRepository.getTeamsForUserTx(actingUser.id).firstOrNull()?.id
+                    ?: throw IllegalArgumentException("teamId is required for team leaderboard")
+            }
+
+            val team = teamsRepository.getByIdTx(parsedTeamId)
+                ?: throw IllegalArgumentException("Team not found")
+
+            if (team.clubId != club.id) {
+                throw IllegalArgumentException("Team does not belong to user's club")
+            }
+
+            team
+        } else {
+            null
+        }
+
+        val allChallengeSubmissions = challengesRepository
+            .getSubmissionsForChallengeTx(challenge.id)
+
+        val filteredSubmissions = allChallengeSubmissions.filter { submission ->
+            val team = teamsById[submission.teamId] ?: return@filter false
+
+            when (requestedScope) {
+                LeaderboardScope.CLUB -> team.clubId == club.id
+                LeaderboardScope.TEAM -> submission.teamId == selectedTeam?.id
+            }
+        }
+
+        val athleteIds = filteredSubmissions.map { it.userId }.distinct()
+        val usersById = usersRepository.getByIdsTx(athleteIds).associateBy { it.id }
+
+        val groupedByAthlete = filteredSubmissions.groupBy { it.userId }
+
+        val lowerIsBetter = isLowerScoreBetter(challenge.scoringType)
+
+        val entriesWithoutRank = groupedByAthlete.mapNotNull { (athleteId, submissions) ->
+            val athlete = usersById[athleteId] ?: return@mapNotNull null
+
+            val bestSubmission = if (lowerIsBetter) {
+                submissions.minWithOrNull(
+                    compareBy<ChallengeSubmission> { it.score }
+                        .thenBy { it.createdAt }
+                )
+            } else {
+                submissions.maxWithOrNull(
+                    compareBy<ChallengeSubmission> { it.score }
+                        .thenByDescending { it.createdAt }
+                )
+            } ?: submissions.first()
+
+            val team = teamsById[bestSubmission.teamId] ?: return@mapNotNull null
+
+            FullLeaderboardEntryResponse(
+                rank = 0,
+                athleteId = athlete.id.toString(),
+                athleteName = athlete.name,
+                teamId = team.id.toString(),
+                teamName = team.name,
+                avatarUrl = athlete.avatarUrl,
+                attempts = submissions.size,
+                bestScore = bestSubmission.score,
+                validationStatus = bestSubmission.validationStatus,
+                submittedAt = bestSubmission.createdAt
+            )
+        }.sortedWith(
+            compareByDescending<FullLeaderboardEntryResponse> { it.bestScore }
+                .thenBy { it.submittedAt }
+        )
+
+        val sortedEntries = if (lowerIsBetter) {
+            entriesWithoutRank.sortedWith(
+                compareBy<FullLeaderboardEntryResponse> { it.bestScore }
+                    .thenBy { it.submittedAt }
+            )
+        } else {
+            entriesWithoutRank.sortedWith(
+                compareByDescending<FullLeaderboardEntryResponse> { it.bestScore }
+                    .thenBy { it.submittedAt }
+            )
+        }
+
+        CurrentChallengeLeaderboardResponse(
+            challenge = challenge.toChallengeSummaryResponse(),
+            scope = requestedScope,
+            clubId = club.id.toString(),
+            clubName = club.name,
+            teamId = selectedTeam?.id?.toString(),
+            teamName = selectedTeam?.name,
+            entries = sortedEntries.mapIndexed { index, entry ->
+                entry.copy(rank = index + 1)
+            }
+        )
+    }
+
+    private fun isLowerScoreBetter(scoringType: String): Boolean {
+        return scoringType == "TIME" || scoringType == "LOW_SCORE"
     }
 
     private suspend fun Challenge.toChallengeSummaryResponse(): ChallengeSummaryResponse {

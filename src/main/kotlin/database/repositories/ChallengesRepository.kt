@@ -292,6 +292,15 @@ class ChallengesRepository {
             .maxByOrNull { it.startTime }
     }
 
+    fun getSubmissionsForChallengeTx(
+        challengeId: UUID
+    ): List<ChallengeSubmission> {
+        return ChallengeSubmissionsTable
+            .selectAll()
+            .where { ChallengeSubmissionsTable.challengeId eq challengeId }
+            .map { it.toChallengeSubmission() }
+    }
+
     fun getBestSubmissionsForChallengeAndTeamTx(
         challengeId: UUID,
         teamId: UUID

@@ -371,14 +371,37 @@ fun Route.challengeRoutes(challengeService: ChallengeService) {
                     call.respond(HttpStatusCode.BadRequest, ApiMessageResponse(e.message ?: "Invalid request"))
                 }
             }
-        }
 
-        get("/{challengeId}/leaderboard") {
-            val challengeId = call.parameters["challengeId"]
-            call.respond(
-                HttpStatusCode.OK,
-                ApiMessageResponse("Get challenge leaderboard endpoint hit")
-            )
+            get("/leaderboard") {
+                val principal = call.principal<JWTPrincipal>()
+                val actingUserIdString = principal?.payload?.getClaim("userId")?.asString()
+
+                if (actingUserIdString.isNullOrBlank()) {
+                    call.respond(
+                        HttpStatusCode.Unauthorized,
+                        ApiMessageResponse("Invalid token")
+                    )
+                    return@get
+                }
+
+                val scope = call.request.queryParameters["scope"]
+                val teamId = call.request.queryParameters["teamId"]
+
+                try {
+                    val response = challengeService.getCurrentChallengeLeaderboard(
+                        actingUserId = UUID.fromString(actingUserIdString),
+                        scope = scope,
+                        teamId = teamId
+                    )
+
+                    call.respond(HttpStatusCode.OK, response)
+                } catch (e: IllegalArgumentException) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        ApiMessageResponse(e.message ?: "Invalid request")
+                    )
+                }
+            }
         }
     }
 }
