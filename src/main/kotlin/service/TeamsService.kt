@@ -76,6 +76,27 @@ class TeamsService(
             )
         }
 
+    suspend fun getMyTeams(actingUserId: UUID): GetTeamsResponse =
+        newSuspendedTransaction(Dispatchers.IO) {
+            val actingUser = usersRepository.getByIdTx(actingUserId)
+                ?: throw IllegalArgumentException("User not found")
+
+            val teams = teamsRepository.getTeamsForUserTx(actingUser.id)
+
+            GetTeamsResponse(
+                teams = teams.map { team ->
+                    TeamResponse(
+                        id = team.id.toString(),
+                        name = team.name,
+                        clubId = team.clubId.toString(),
+                        lowerAgeRange = team.lowerAgeRange,
+                        upperAgeRange = team.upperAgeRange,
+                        createdAt = team.createdAt
+                    )
+                }
+            )
+        }
+
     suspend fun createTeam(
         actingUserId: UUID,
         request: CreateTeamRequest

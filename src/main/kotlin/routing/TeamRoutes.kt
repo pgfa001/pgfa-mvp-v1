@@ -41,6 +41,26 @@ fun Route.teamRoutes(teamsService: TeamsService) {
                 }
             }
 
+            get("/me") {
+                val principal = call.principal<JWTPrincipal>()
+                val actingUserIdString = principal?.payload?.getClaim("userId")?.asString()
+
+                if (actingUserIdString.isNullOrBlank()) {
+                    call.respond(HttpStatusCode.Unauthorized, ApiMessageResponse("Invalid token"))
+                    return@get
+                }
+
+                try {
+                    val response = teamsService.getMyTeams(UUID.fromString(actingUserIdString))
+                    call.respond(HttpStatusCode.OK, response)
+                } catch (e: IllegalArgumentException) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        ApiMessageResponse(e.message ?: "Invalid request")
+                    )
+                }
+            }
+
             post {
                 val principal = call.principal<JWTPrincipal>()
                 val actingUserIdString = principal?.payload?.getClaim("userId")?.asString()
