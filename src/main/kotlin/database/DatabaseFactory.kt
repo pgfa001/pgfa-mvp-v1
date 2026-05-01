@@ -6,6 +6,7 @@ import com.provingground.database.tables.ChallengeToClubsTable
 import com.provingground.database.tables.ChallengeUploadIntentsTable
 import com.provingground.database.tables.ChallengesTable
 import com.provingground.database.tables.ClubLogoUploadIntentsTable
+import com.provingground.database.tables.ClubAdminsTable
 import com.provingground.database.tables.ClubToUsersTable
 import com.provingground.database.tables.ClubsTable
 import com.provingground.database.tables.ConsentsTable
@@ -49,6 +50,7 @@ object DatabaseFactory {
                 ClubsTable,
                 TeamsTable,
                 UsersTable,
+                ClubAdminsTable,
                 ClubToUsersTable,
                 TeamsToUsersTable,
                 ChallengesTable,

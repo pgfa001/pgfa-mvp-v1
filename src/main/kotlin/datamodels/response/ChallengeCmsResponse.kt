@@ -1,5 +1,6 @@
 package com.provingground.datamodels.response
 
+import com.provingground.database.tables.ChallengeScoringType
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -8,7 +9,7 @@ data class ChallengeCmsResponse(
     val title: String,
     val description: String,
     val demoVideoObjectKey: String? = null,
-    val scoringType: String,
+    val scoringType: ChallengeScoringType,
     val difficulty: Int,
     val startTime: Long,
     val endTime: Long,

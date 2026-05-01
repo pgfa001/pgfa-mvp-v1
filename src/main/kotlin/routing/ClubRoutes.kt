@@ -1,6 +1,7 @@
 package com.provingground.routing
 
 import com.provingground.datamodels.ApiMessageResponse
+import com.provingground.datamodels.response.CreateClubAdminRequest
 import com.provingground.datamodels.response.CreateClubLogoUploadUrlRequest
 import com.provingground.datamodels.response.CreateClubRequest
 import com.provingground.datamodels.response.UpdateClubRequest
@@ -27,17 +28,26 @@ fun Route.clubRoutes(
     route("/clubs") {
 
         get("/details") {
+            val id = call.request.queryParameters["id"]
             val accessCode = call.request.queryParameters["accessCode"]
 
-            if (accessCode.isNullOrBlank()) {
+            if (id.isNullOrBlank() && accessCode.isNullOrBlank()) {
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    ApiMessageResponse("Missing required query parameter: accessCode")
+                    ApiMessageResponse("Missing required query parameter: id or accessCode")
                 )
                 return@get
             }
 
-            val club = clubsService.getClubDetailsByAccessCode(accessCode)
+            val club = try {
+                clubsService.getClubDetails(id = id, accessCode = accessCode)
+            } catch (e: IllegalArgumentException) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    ApiMessageResponse(e.message ?: "Invalid request")
+                )
+                return@get
+            }
 
             if (club == null) {
                 call.respond(
@@ -101,6 +111,37 @@ fun Route.clubRoutes(
                 val request = call.receive<CreateClubRequest>()
                 val response = clubsService.createClub(actingUserId, request)
                 call.respond(HttpStatusCode.OK, response)
+            }
+
+            post("/{clubId}/admins") {
+                val principal = call.principal<JWTPrincipal>()
+                val actingUserIdString = principal?.payload?.getClaim("userId")?.asString()
+
+                if (actingUserIdString.isNullOrBlank()) {
+                    call.respond(HttpStatusCode.Unauthorized, ApiMessageResponse("Invalid token"))
+                    return@post
+                }
+
+                val clubId = call.parameters["clubId"]
+                if (clubId.isNullOrBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ApiMessageResponse("Missing clubId"))
+                    return@post
+                }
+
+                try {
+                    val request = call.receive<CreateClubAdminRequest>()
+                    val response = clubsService.createClubAdmin(
+                        actingUserId = UUID.fromString(actingUserIdString),
+                        clubId = clubId,
+                        request = request
+                    )
+                    call.respond(HttpStatusCode.OK, response)
+                } catch (e: IllegalArgumentException) {
+                    call.respond(
+                        HttpStatusCode.BadRequest,
+                        ApiMessageResponse(e.message ?: "Invalid request")
+                    )
+                }
             }
 
             put("/{clubId}") {

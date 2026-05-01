@@ -53,11 +53,14 @@ class TeamsService(
             val actingUser = usersRepository.getByIdTx(actingUserId)
                 ?: throw IllegalArgumentException("User not found")
 
-            if (actingUser.role != UserRole.ADMIN) {
-                throw IllegalArgumentException("Only admins can view all teams")
+            val teams = when (actingUser.role) {
+                UserRole.SUPERADMIN -> teamsRepository.getAllTx()
+                UserRole.ADMIN -> {
+                    val adminClubIds = clubsRepository.getClubIdsForAdminTx(actingUser.id)
+                    teamsRepository.getByClubIdsTx(adminClubIds)
+                }
+                else -> throw IllegalArgumentException("Only admins can view teams")
             }
-
-            val teams = teamsRepository.getAllTx()
 
             GetTeamsResponse(
                 teams = teams.map { team ->
@@ -80,10 +83,6 @@ class TeamsService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can create teams")
-        }
-
         val clubUuid = try {
             UUID.fromString(request.clubId)
         } catch (_: Exception) {
@@ -92,6 +91,8 @@ class TeamsService(
 
         val club = clubsRepository.getByIdTx(clubUuid)
             ?: throw IllegalArgumentException("Club not found")
+
+        requireCanManageClub(actingUser.id, actingUser.role, club.id)
 
         if (request.name.isBlank()) {
             throw IllegalArgumentException("Team name is required")
@@ -130,10 +131,6 @@ class TeamsService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can update teams")
-        }
-
         val teamUuid = try {
             UUID.fromString(teamId)
         } catch (_: Exception) {
@@ -151,6 +148,9 @@ class TeamsService(
 
         val club = clubsRepository.getByIdTx(clubUuid)
             ?: throw IllegalArgumentException("Club not found")
+
+        requireCanManageClub(actingUser.id, actingUser.role, existingTeam.clubId)
+        requireCanManageClub(actingUser.id, actingUser.role, club.id)
 
         if (request.name.isBlank()) {
             throw IllegalArgumentException("Team name is required")
@@ -246,6 +246,10 @@ class TeamsService(
                 UserRole.ADMIN -> {
                     throw IllegalArgumentException("Admins cannot use this team join flow")
                 }
+
+                UserRole.SUPERADMIN -> {
+                    throw IllegalArgumentException("Super Admins cannot use this team join flow")
+                }
             }
 
             val targetUserClubIds = clubsRepository
@@ -310,5 +314,21 @@ class TeamsService(
             success = true,
             assignments = joinedAssignments
         )
+    }
+
+    private fun requireCanManageClub(
+        actingUserId: UUID,
+        role: UserRole,
+        clubId: UUID
+    ) {
+        when (role) {
+            UserRole.SUPERADMIN -> return
+            UserRole.ADMIN -> {
+                if (!clubsRepository.isUserClubAdminTx(actingUserId, clubId)) {
+                    throw IllegalArgumentException("Admin may only manage teams for assigned clubs")
+                }
+            }
+            else -> throw IllegalArgumentException("Only admins can manage teams")
+        }
     }
 }

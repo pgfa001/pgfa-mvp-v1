@@ -1,6 +1,7 @@
 package com.provingground.datamodels
 
 import com.provingground.database.tables.ConsentType
+import com.provingground.database.tables.ChallengeScoringType
 import com.provingground.database.tables.SubscriptionType
 import com.provingground.database.tables.UserRole
 import com.provingground.database.tables.SubmissionValidationStatus
@@ -72,7 +73,7 @@ data class Challenge(
     val title: String,
     val description: String,
     val demoVideoObjectKey: String?,
-    val scoringType: String,
+    val scoringType: ChallengeScoringType,
     val difficulty: Int,
     val startTime: Long,
     val endTime: Long,
@@ -192,7 +193,7 @@ data class CreateChallengeCmsRequest(
     val title: String,
     val description: String,
     val demoVideoObjectKey: String? = null,
-    val scoringType: String,
+    val scoringType: ChallengeScoringType,
     val difficulty: Int,
     val startTime: Long,
     val endTime: Long,
@@ -204,7 +205,7 @@ data class UpdateChallengeCmsRequest(
     val title: String,
     val description: String,
     val demoVideoObjectKey: String? = null,
-    val scoringType: String,
+    val scoringType: ChallengeScoringType,
     val difficulty: Int,
     val startTime: Long,
     val endTime: Long,

@@ -1,5 +1,6 @@
 package com.provingground.service
 
+import com.provingground.PasswordHasher
 import com.provingground.database.repositories.ClubsRepository
 import com.provingground.database.repositories.UsersRepository
 import com.provingground.database.tables.UserRole
@@ -8,13 +9,16 @@ import com.provingground.datamodels.ClubLogoUploadIntent
 import com.provingground.datamodels.ClubSummaryResponse
 import com.provingground.datamodels.GetClubsResponse
 import com.provingground.datamodels.response.ClubCmsResponse
+import com.provingground.datamodels.response.ClubAdminResponse
 import com.provingground.datamodels.response.ClubDetailsResponse
+import com.provingground.datamodels.response.CreateClubAdminRequest
 import com.provingground.datamodels.response.CreateClubLogoUploadUrlRequest
 import com.provingground.datamodels.response.CreateClubLogoUploadUrlResponse
 import com.provingground.datamodels.response.CreateClubRequest
 import com.provingground.datamodels.response.GetClubLogoUrlResponse
 import com.provingground.datamodels.response.UpdateClubRequest
 import com.provingground.datamodels.toCmsResponse
+import com.provingground.datamodels.User
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.util.UUID
@@ -23,6 +27,7 @@ class ClubsService(
     private val clubsRepository: ClubsRepository,
     private val usersRepository: UsersRepository,
     private val videoStorageService: VideoStorageService,
+    private val passwordHasher: PasswordHasher,
 ) {
     suspend fun createClub(
         actingUserId: UUID,
@@ -31,8 +36,8 @@ class ClubsService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can create clubs")
+        if (actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins can create clubs")
         }
 
         if (request.name.isBlank()) throw IllegalArgumentException("Club name is required")
@@ -71,6 +76,74 @@ class ClubsService(
         club.toCmsResponse()
     }
 
+    suspend fun createClubAdmin(
+        actingUserId: UUID,
+        clubId: String,
+        request: CreateClubAdminRequest
+    ): ClubAdminResponse = newSuspendedTransaction(Dispatchers.IO) {
+        val actingUser = usersRepository.getByIdTx(actingUserId)
+            ?: throw IllegalArgumentException("User not found")
+
+        if (actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins can create club admins")
+        }
+
+        val clubUuid = try {
+            UUID.fromString(clubId)
+        } catch (_: Exception) {
+            throw IllegalArgumentException("Invalid clubId")
+        }
+
+        val club = clubsRepository.getByIdTx(clubUuid)
+            ?: throw IllegalArgumentException("Club not found")
+
+        if (request.name.isBlank()) throw IllegalArgumentException("Name is required")
+        if (request.username.isBlank()) throw IllegalArgumentException("Username is required")
+        if (request.password.isBlank()) throw IllegalArgumentException("Password is required")
+        if (request.email.isBlank()) throw IllegalArgumentException("Email is required")
+
+        val username = request.username.trim()
+        val email = request.email.trim()
+
+        if (usersRepository.usernameExistsTx(username)) {
+            throw IllegalArgumentException("Username already exists")
+        }
+
+        if (usersRepository.emailExistsTx(email)) {
+            throw IllegalArgumentException("Email already exists")
+        }
+
+        val now = System.currentTimeMillis()
+        val admin = User(
+            id = UUID.randomUUID(),
+            name = request.name.trim(),
+            username = username,
+            password = passwordHasher.hash(request.password),
+            email = email,
+            phone = request.phone.trim(),
+            role = UserRole.ADMIN,
+            dob = request.dob,
+            avatarUrl = null,
+            position = null,
+            createdAt = now
+        )
+
+        usersRepository.createTx(admin)
+        clubsRepository.addUserToClubTx(admin.id, club.id, createdAt = now)
+        clubsRepository.addClubAdminTx(admin.id, club.id, createdAt = now)
+
+        ClubAdminResponse(
+            id = admin.id.toString(),
+            clubId = club.id.toString(),
+            name = admin.name,
+            username = admin.username,
+            email = admin.email ?: "",
+            phone = admin.phone ?: "",
+            role = admin.role,
+            createdAt = admin.createdAt
+        )
+    }
+
     suspend fun updateClub(
         actingUserId: UUID,
         clubId: String,
@@ -79,8 +152,8 @@ class ClubsService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can update clubs")
+        if (actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins can update clubs")
         }
 
         val clubUuid = UUID.fromString(clubId)
@@ -129,8 +202,8 @@ class ClubsService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can delete clubs")
+        if (actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins can delete clubs")
         }
 
         val clubUuid = UUID.fromString(clubId)
@@ -146,8 +219,8 @@ class ClubsService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can upload club logos")
+        if (actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins can upload club logos")
         }
 
         val safeFileName = request.fileName.substringAfterLast('/').substringAfterLast('\\')
@@ -198,15 +271,15 @@ class ClubsService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can view club logos from CMS")
+        if (actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins can view club logos from CMS")
         }
 
         val clubUuid = UUID.fromString(clubId)
         val club = clubsRepository.getByIdTx(clubUuid)
             ?: throw IllegalArgumentException("Club not found")
 
-        val objectKey = club.logoUrl
+        val objectKey = club.logoUrl.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("Club has no logo")
 
         val readUrl = videoStorageService.createReadUrl(objectKey, expiresInSeconds = 900)
@@ -218,8 +291,20 @@ class ClubsService(
         )
     }
 
-    suspend fun getClubDetailsByAccessCode(accessCode: String): ClubDetailsResponse? {
-        val club = clubsRepository.getByAccessCode(accessCode) ?: return null
+    suspend fun getClubDetails(id: String?, accessCode: String?): ClubDetailsResponse? {
+        val club = (if (!id.isNullOrBlank()) {
+            val clubUuid = try {
+                UUID.fromString(id)
+            } catch (_: Exception) {
+                throw IllegalArgumentException("Invalid club id")
+            }
+
+            clubsRepository.getById(clubUuid)
+        } else if (!accessCode.isNullOrBlank()) {
+            clubsRepository.getByAccessCode(accessCode)
+        } else {
+            throw IllegalArgumentException("Missing required query parameter: id or accessCode")
+        }) ?: return null
 
         return ClubDetailsResponse(
             id = club.id.toString(),
@@ -236,8 +321,8 @@ class ClubsService(
             val actingUser = usersRepository.getByIdTx(actingUserId)
                 ?: throw IllegalArgumentException("User not found")
 
-            if (actingUser.role != UserRole.ADMIN) {
-                throw IllegalArgumentException("Only admins can view clubs")
+            if (actingUser.role != UserRole.SUPERADMIN) {
+                throw IllegalArgumentException("Only super admins can view clubs")
             }
 
             val clubs = clubsRepository.getAllTx()

@@ -68,6 +68,15 @@ class TeamsRepository {
             .map { it.toTeam() }
     }
 
+    fun getByClubIdsTx(clubIds: Collection<UUID>): List<Team> {
+        if (clubIds.isEmpty()) return emptyList()
+
+        return TeamsTable
+            .selectAll()
+            .where { TeamsTable.clubId inList clubIds }
+            .map { it.toTeam() }
+    }
+
     suspend fun getByClubId(clubId: UUID): List<Team> = dbQuery {
         getByClubIdTx(clubId)
     }

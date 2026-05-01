@@ -1,12 +1,14 @@
 package com.provingground.database.repositories
 
 import com.provingground.database.dbQuery
+import com.provingground.database.tables.ClubAdminsTable
 import com.provingground.database.tables.ClubLogoUploadIntentsTable
 import com.provingground.database.tables.ClubToUsersTable
 import com.provingground.database.tables.ClubsTable
 import com.provingground.database.tables.UsersTable
 import com.provingground.database.toClub
 import com.provingground.database.toClubLogoUploadIntent
+import com.provingground.database.toUser
 import com.provingground.datamodels.Club
 import com.provingground.datamodels.ClubLogoUploadIntent
 import com.provingground.datamodels.User
@@ -102,6 +104,64 @@ class ClubsRepository {
             it[ClubToUsersTable.clubId] = clubId
             it[ClubToUsersTable.createdAt] = createdAt
         }
+    }
+
+    fun addClubAdminTx(
+        userId: UUID,
+        clubId: UUID,
+        relationshipId: UUID = UUID.randomUUID(),
+        createdAt: Long = System.currentTimeMillis()
+    ) {
+        ClubAdminsTable.insert {
+            it[id] = relationshipId
+            it[ClubAdminsTable.userId] = userId
+            it[ClubAdminsTable.clubId] = clubId
+            it[ClubAdminsTable.createdAt] = createdAt
+        }
+    }
+
+    suspend fun addClubAdmin(
+        userId: UUID,
+        clubId: UUID,
+        relationshipId: UUID = UUID.randomUUID(),
+        createdAt: Long = System.currentTimeMillis()
+    ) = dbQuery {
+        addClubAdminTx(userId, clubId, relationshipId, createdAt)
+    }
+
+    fun isUserClubAdminTx(userId: UUID, clubId: UUID): Boolean {
+        return ClubAdminsTable
+            .selectAll()
+            .where {
+                (ClubAdminsTable.userId eq userId) and
+                        (ClubAdminsTable.clubId eq clubId)
+            }
+            .any()
+    }
+
+    suspend fun isUserClubAdmin(userId: UUID, clubId: UUID): Boolean = dbQuery {
+        isUserClubAdminTx(userId, clubId)
+    }
+
+    fun getClubIdsForAdminTx(userId: UUID): List<UUID> {
+        return ClubAdminsTable
+            .select(ClubAdminsTable.clubId)
+            .where { ClubAdminsTable.userId eq userId }
+            .map { it[ClubAdminsTable.clubId] }
+    }
+
+    fun getClubsForAdminTx(userId: UUID): List<Club> {
+        return (ClubsTable innerJoin ClubAdminsTable)
+            .selectAll()
+            .where { ClubAdminsTable.userId eq userId }
+            .map { it.toClub() }
+    }
+
+    fun getAdminsForClubTx(clubId: UUID): List<User> {
+        return (UsersTable innerJoin ClubAdminsTable)
+            .selectAll()
+            .where { ClubAdminsTable.clubId eq clubId }
+            .map { it.toUser() }
     }
 
     suspend fun addUserToClub(

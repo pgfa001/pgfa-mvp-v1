@@ -7,6 +7,7 @@ enum class UserRole {
     PARENT,
     COACH,
     ADMIN,
+    SUPERADMIN,
 }
 
 object UsersTable : Table("users") {
@@ -26,6 +27,19 @@ object UsersTable : Table("users") {
 }
 
 object ClubToUsersTable : Table("clubs_to_users") {
+    val id = uuid("id")
+    val userId = uuid("user_id").references(UsersTable.id)
+    val clubId = uuid("club_id").references(ClubsTable.id)
+    val createdAt = long("created_at")
+
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex(userId, clubId)
+    }
+}
+
+object ClubAdminsTable : Table("club_admins") {
     val id = uuid("id")
     val userId = uuid("user_id").references(UsersTable.id)
     val clubId = uuid("club_id").references(ClubsTable.id)

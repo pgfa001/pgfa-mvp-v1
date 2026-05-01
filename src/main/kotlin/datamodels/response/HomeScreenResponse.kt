@@ -1,6 +1,7 @@
 package com.provingground.datamodels.response
 
 import com.provingground.database.tables.SubmissionValidationStatus
+import com.provingground.database.tables.ChallengeScoringType
 import com.provingground.database.tables.UserRole
 import kotlinx.serialization.Serializable
 
@@ -29,7 +30,7 @@ data class ChallengeSummaryResponse(
     val title: String,
     val description: String,
     val demoVideoUrl: String? = null,
-    val scoringType: String,
+    val scoringType: ChallengeScoringType,
     val difficulty: Int,
     val startTime: Long,
     val endTime: Long

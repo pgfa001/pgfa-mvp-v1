@@ -9,5 +9,6 @@ data class LoginResponse(
     val userId: String,
     val username: String,
     val role: UserRole,
+    val clubId: String? = null,
     val hasAcceptedRequiredConsents: Boolean,
 )

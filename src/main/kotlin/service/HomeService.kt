@@ -3,6 +3,7 @@ package com.provingground.service
 import com.provingground.database.repositories.ChallengesRepository
 import com.provingground.database.repositories.TeamsRepository
 import com.provingground.database.repositories.UsersRepository
+import com.provingground.database.tables.ChallengeScoringType
 import com.provingground.database.tables.UserRole
 import com.provingground.datamodels.Challenge
 import com.provingground.datamodels.ChallengeSubmission
@@ -35,6 +36,7 @@ class HomeService(
                 UserRole.PARENT -> buildParentCards(user)
                 UserRole.COACH -> buildCoachCards(user)
                 UserRole.ADMIN -> emptyList()
+                UserRole.SUPERADMIN -> emptyList()
             }
 
             HomeScreenResponse(
@@ -162,11 +164,8 @@ class HomeService(
         if (challenge == null) return emptyList()
 
         return challengesRepository
-            .getBestSubmissionsForChallengeAndTeamTx(challenge.id, team.id)
-            .sortedWith(
-                compareByDescending<Pair<ChallengeSubmission, User>> { it.first.score }
-                    .thenBy { it.first.createdAt }
-            )
+            .getBestSubmissionsForChallengeAndTeamTx(challenge.id, team.id, challenge.scoringType)
+            .sortedWith(bestSubmissionComparator(challenge.scoringType))
             .take(limit)
             .mapIndexed { index, (submission, user) ->
                 LeaderboardEntryResponse(
@@ -179,6 +178,18 @@ class HomeService(
                     validationStatus = submission.validationStatus
                 )
             }
+    }
+
+    private fun bestSubmissionComparator(
+        scoringType: ChallengeScoringType
+    ): Comparator<Pair<ChallengeSubmission, User>> {
+        return if (scoringType.higherIsBetter) {
+            compareByDescending<Pair<ChallengeSubmission, User>> { it.first.score }
+                .thenBy { it.first.createdAt }
+        } else {
+            compareBy<Pair<ChallengeSubmission, User>> { it.first.score }
+                .thenBy { it.first.createdAt }
+        }
     }
 
     private suspend fun Challenge.toChallengeSummaryResponse(): ChallengeSummaryResponse {

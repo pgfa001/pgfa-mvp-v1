@@ -40,7 +40,7 @@ fun seedInitialData() {
     transaction {
         val now = System.currentTimeMillis()
 
-        val adminUuid = UUID.fromString("d5065ef1-e027-4bcc-83ad-79c0d3ebf063")
+        val adminUuid = UUID.fromString("d5065ef1-e027-4bcc-83ad-79c0d3ebf064")
 
         val existingAdmin = UsersTable
             .selectAll()
@@ -52,11 +52,11 @@ fun seedInitialData() {
             UsersTable.insert {
                 it[id] = adminUuid
                 it[name] = "Evan"
-                it[username] = "evan"
+                it[username] = "superadmin"
                 it[password] = passwordHasher.hash("password")
                 it[email] = "evan@test.com"
                 it[phone] = "2032418463"
-                it[role] = UserRole.ADMIN
+                it[role] = UserRole.SUPERADMIN
                 it[dob] = "05/16/1993"
                 it[createdAt] = now
             }

@@ -40,6 +40,7 @@ class AuthService(
             userId = user.id.toString(),
             username = user.username,
             role = user.role,
+            clubId = getLoginClubIdTx(user),
             hasAcceptedRequiredConsents = hasAcceptedRequiredConsents,
         )
     }
@@ -56,6 +57,10 @@ class AuthService(
                 UserRole.valueOf(request.role)
             } catch (_: Exception) {
                 throw IllegalArgumentException("Invalid role")
+            }
+
+            if (role == UserRole.ADMIN || role == UserRole.SUPERADMIN) {
+                throw IllegalArgumentException("Admin accounts must be created by a super admin")
             }
 
             if (usersRepository.usernameExistsTx(request.username)) {
@@ -135,7 +140,21 @@ class AuthService(
                 userId = primaryUser.id.toString(),
                 username = primaryUser.username,
                 role = primaryUser.role,
+                clubId = clubId.toString(),
                 hasAcceptedRequiredConsents = false
             )
         }
+
+    private fun getLoginClubIdTx(user: User): String? {
+        if (user.role == UserRole.SUPERADMIN) return null
+
+        val clubId = if (user.role == UserRole.ADMIN) {
+            clubsRepository.getClubIdsForAdminTx(user.id).firstOrNull()
+                ?: clubsRepository.getClubsForUserTx(user.id).firstOrNull()?.id
+        } else {
+            clubsRepository.getClubsForUserTx(user.id).firstOrNull()?.id
+        }
+
+        return clubId?.toString()
+    }
 }

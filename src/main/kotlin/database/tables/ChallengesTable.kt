@@ -2,6 +2,28 @@ package com.provingground.database.tables
 
 import org.jetbrains.exposed.sql.Table
 
+enum class ChallengeScoringType {
+    HIGH_SCORE,
+    LOW_SCORE,
+    FASTEST_TIME,
+    LONGEST_TIME;
+
+    val higherIsBetter: Boolean
+        get() = this == HIGH_SCORE || this == LONGEST_TIME
+
+    companion object {
+        fun fromStoredValue(value: String): ChallengeScoringType {
+            return when (value.uppercase()) {
+                "HIGH_SCORE" -> HIGH_SCORE
+                "LOW_SCORE" -> LOW_SCORE
+                "FASTEST_TIME", "TIME" -> FASTEST_TIME
+                "LONGEST_TIME" -> LONGEST_TIME
+                else -> throw IllegalArgumentException("Invalid scoring type: $value")
+            }
+        }
+    }
+}
+
 object ChallengesTable : Table("challenges") {
     val id = uuid("id")
     val title = varchar("title", 255)

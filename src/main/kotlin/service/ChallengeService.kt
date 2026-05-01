@@ -4,6 +4,7 @@ import com.provingground.database.repositories.ChallengesRepository
 import com.provingground.database.repositories.ClubsRepository
 import com.provingground.database.repositories.TeamsRepository
 import com.provingground.database.repositories.UsersRepository
+import com.provingground.database.tables.ChallengeScoringType
 import com.provingground.database.tables.SubmissionValidationStatus
 import com.provingground.database.tables.UserRole
 import com.provingground.datamodels.Challenge
@@ -98,6 +99,7 @@ class ChallengeService(
             )
 
             UserRole.ADMIN -> throw IllegalArgumentException("Admins do not have a challenge details view")
+            UserRole.SUPERADMIN -> throw IllegalArgumentException("Admins do not have a challenge details view")
         }
 
         ChallengeDetailsResponse(
@@ -152,6 +154,10 @@ class ChallengeService(
             UserRole.ADMIN -> {
                 throw IllegalArgumentException("Admins do not have personal challenge submissions")
             }
+
+            UserRole.SUPERADMIN -> {
+                throw IllegalArgumentException("Super Admins do not have personal challenge submissions")
+            }
         }
     }
 
@@ -163,8 +169,8 @@ class ChallengeService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.COACH && actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only coaches and admins can review challenge submissions")
+        if (actingUser.role != UserRole.COACH && actingUser.role != UserRole.ADMIN && actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins, admins, and coaches can review challenge submissions")
         }
 
         val challengeUuid = try {
@@ -200,23 +206,53 @@ class ChallengeService(
                         teamId = requestedTeamUuid
                     )
                 } else {
-                    challengesRepository.getSubmissionsByChallengeId(challenge.id)
+                    challengesRepository.getSubmissionsByChallengeIdTx(challenge.id)
                         .filter { it.teamId in coachedTeamIds }
                 }
             }
 
             UserRole.ADMIN -> {
+                val adminClubIds = clubsRepository.getClubIdsForAdminTx(actingUser.id).toSet()
+                if (adminClubIds.isEmpty()) {
+                    throw IllegalArgumentException("Admin is not assigned to a club")
+                }
+
+                if (requestedTeamUuid != null) {
+                    val requestedTeam = teamsRepository.getByIdTx(requestedTeamUuid)
+                        ?: throw IllegalArgumentException("Team not found")
+
+                    if (requestedTeam.clubId !in adminClubIds) {
+                        throw IllegalArgumentException("Admin may only review submissions for assigned clubs")
+                    }
+
+                    challengesRepository.getAllSubmissionsForChallengeAndTeamTx(
+                        challengeId = challenge.id,
+                        teamId = requestedTeamUuid
+                    )
+                } else {
+                    val allSubmissions = challengesRepository.getSubmissionsByChallengeIdTx(challenge.id)
+                    val teamsById = teamsRepository
+                        .getByIdsTx(allSubmissions.map { it.teamId }.distinct())
+                        .associateBy { it.id }
+
+                    allSubmissions.filter { submission ->
+                        teamsById[submission.teamId]?.clubId?.let { it in adminClubIds } == true
+                    }
+                }
+            }
+
+            UserRole.SUPERADMIN -> {
                 if (requestedTeamUuid != null) {
                     challengesRepository.getAllSubmissionsForChallengeAndTeamTx(
                         challengeId = challenge.id,
                         teamId = requestedTeamUuid
                     )
                 } else {
-                    challengesRepository.getSubmissionsByChallengeId(challenge.id)
+                    challengesRepository.getSubmissionsByChallengeIdTx(challenge.id)
                 }
             }
 
-            else -> throw IllegalArgumentException("Only coaches and admins can review challenge submissions")
+            UserRole.ATHLETE, UserRole.PARENT -> throw IllegalArgumentException("Only super admins, admins, and coaches can review challenge submissions")
         }
 
         val athleteIds = submissions.map { it.userId }.distinct()
@@ -379,6 +415,12 @@ class ChallengeService(
             }
 
             UserRole.ADMIN -> {
+                if (!clubsRepository.isUserClubAdminTx(actingUser.id, team.clubId)) {
+                    throw IllegalArgumentException("Admin may only view submissions for assigned clubs")
+                }
+            }
+
+            UserRole.SUPERADMIN -> {
                 // allowed
             }
         }
@@ -412,8 +454,8 @@ class ChallengeService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.COACH && actingUser.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only coaches or admins can verify submissions")
+        if (actingUser.role != UserRole.COACH && actingUser.role != UserRole.ADMIN && actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins, admins, or coaches can verify submissions")
         }
 
         if (
@@ -443,6 +485,12 @@ class ChallengeService(
             if (submission.teamId !in coachedTeamIds) {
                 throw IllegalArgumentException("Coach may only verify submissions for teams they coach")
             }
+        }
+
+        if (actingUser.role == UserRole.ADMIN &&
+            !clubsRepository.isUserClubAdminTx(actingUser.id, team.clubId)
+        ) {
+            throw IllegalArgumentException("Admin may only verify submissions for assigned clubs")
         }
 
         challengesRepository.updateSubmissionValidationStatusTx(
@@ -554,7 +602,7 @@ class ChallengeService(
                 }
                 child
             }
-            UserRole.COACH, UserRole.ADMIN -> {
+            UserRole.COACH, UserRole.ADMIN, UserRole.SUPERADMIN -> {
                 throw IllegalArgumentException("This user role cannot submit challenge attempts")
             }
         }
@@ -595,7 +643,7 @@ class ChallengeService(
                 athleteName = athlete.name,
                 teamId = team.id.toString(),
                 teamName = team.name,
-                leaderboard = buildLeaderboard(challenge.id, team.id, limit = 10),
+                leaderboard = buildLeaderboard(challenge, team.id, limit = 10),
                 hasSubmitted = submissions.isNotEmpty(),
                 submissionCount = submissions.size
             )
@@ -641,7 +689,7 @@ class ChallengeService(
                 athleteName = child.name,
                 teamId = team.id.toString(),
                 teamName = team.name,
-                leaderboard = buildLeaderboard(challenge.id, team.id, limit = 10),
+                leaderboard = buildLeaderboard(challenge, team.id, limit = 10),
                 hasSubmitted = submissions.isNotEmpty(),
                 submissionCount = submissions.size
             )
@@ -671,7 +719,7 @@ class ChallengeService(
                 athleteName = null,
                 teamId = team.id.toString(),
                 teamName = team.name,
-                leaderboard = buildLeaderboard(challenge.id, team.id, limit = 10),
+                leaderboard = buildLeaderboard(challenge, team.id, limit = 10),
                 hasSubmitted = false,
                 submissionCount = 0
             )
@@ -679,16 +727,13 @@ class ChallengeService(
     }
 
     private fun buildLeaderboard(
-        challengeId: UUID,
+        challenge: Challenge,
         teamId: UUID,
         limit: Int
     ): List<LeaderboardEntryResponse> {
         return challengesRepository
-            .getBestSubmissionsForChallengeAndTeamTx(challengeId, teamId)
-            .sortedWith(
-                compareByDescending<Pair<ChallengeSubmission, User>> { it.first.score }
-                    .thenBy { it.first.createdAt }
-            )
+            .getBestSubmissionsForChallengeAndTeamTx(challenge.id, teamId, challenge.scoringType)
+            .sortedWith(bestSubmissionComparator(challenge.scoringType))
             .take(limit)
             .mapIndexed { index, (submission, user) ->
                 LeaderboardEntryResponse(
@@ -786,14 +831,14 @@ class ChallengeService(
         )
     }
 
-    private fun requireAdmin(user: User) {
-        if (user.role != UserRole.ADMIN) {
-            throw IllegalArgumentException("Only admins can perform this action")
+    private fun requireSuperAdmin(user: User) {
+        if (user.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins can perform this action")
         }
     }
 
     private fun requireAdminOrCoach(user: User) {
-        if (user.role != UserRole.ADMIN && user.role != UserRole.COACH) {
+        if (user.role != UserRole.ADMIN && user.role != UserRole.COACH && user.role != UserRole.SUPERADMIN) {
             throw IllegalArgumentException("Only admins or coaches can perform this action")
         }
     }
@@ -804,10 +849,31 @@ class ChallengeService(
                 ?: throw IllegalArgumentException("User not found")
             requireAdminOrCoach(actingUser)
 
-            val challenges = challengesRepository.getAllTx()
+            val visibleClubIds = when (actingUser.role) {
+                UserRole.SUPERADMIN -> null
+                UserRole.ADMIN -> clubsRepository.getClubIdsForAdminTx(actingUser.id).toSet()
+                UserRole.COACH -> teamsRepository.getTeamsForUserTx(actingUser.id)
+                    .map { it.clubId }
+                    .toSet()
+                else -> emptySet()
+            }
+
+            val challenges = if (visibleClubIds == null) {
+                challengesRepository.getAllTx()
+            } else {
+                challengesRepository.getByClubIdsTx(visibleClubIds)
+            }
 
             GetChallengesCmsResponse(
                 challenges = challenges.map { challenge ->
+                    val clubIds = challengesRepository.getClubIdsForChallengeTx(challenge.id)
+                    val responseClubIds = if (visibleClubIds == null) {
+                        clubIds
+                    } else {
+                        val allowedClubIds = visibleClubIds
+                        clubIds.filter { it in allowedClubIds }
+                    }
+
                     ChallengeCmsResponse(
                         id = challenge.id.toString(),
                         title = challenge.title,
@@ -819,9 +885,7 @@ class ChallengeService(
                         endTime = challenge.endTime,
                         createdBy = challenge.createdBy.toString(),
                         createdAt = challenge.createdAt,
-                        clubIds = challengesRepository
-                            .getClubIdsForChallengeTx(challenge.id)
-                            .map { it.toString() }
+                        clubIds = responseClubIds.map { it.toString() }
                     )
                 }
             )
@@ -833,7 +897,7 @@ class ChallengeService(
     ): ChallengeCmsResponse = newSuspendedTransaction(Dispatchers.IO) {
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
-        requireAdmin(actingUser)
+        requireSuperAdmin(actingUser)
 
         if (request.title.isBlank()) throw IllegalArgumentException("Title is required")
         if (request.clubIds.isEmpty()) throw IllegalArgumentException("At least one club must be selected")
@@ -903,7 +967,7 @@ class ChallengeService(
     ): ChallengeCmsResponse = newSuspendedTransaction(Dispatchers.IO) {
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
-        requireAdmin(actingUser)
+        requireSuperAdmin(actingUser)
 
         val challengeUuid = try {
             UUID.fromString(challengeId)
@@ -970,7 +1034,7 @@ class ChallengeService(
     ): CreateChallengeDemoUploadUrlResponse = newSuspendedTransaction(Dispatchers.IO) {
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
-        requireAdmin(actingUser)
+        requireSuperAdmin(actingUser)
 
         val safeFileName = request.fileName.substringAfterLast('/').substringAfterLast('\\')
         val extension = safeFileName.substringAfterLast('.', "")
@@ -1021,8 +1085,8 @@ class ChallengeService(
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
 
-        if (actingUser.role != UserRole.ADMIN && actingUser.role != UserRole.COACH) {
-            throw IllegalArgumentException("Only admins and coaches can view challenge demo videos")
+        if (actingUser.role != UserRole.ADMIN && actingUser.role != UserRole.COACH && actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins, admins, and coaches can view challenge demo videos")
         }
 
         val challengeUuid = try {
@@ -1033,6 +1097,29 @@ class ChallengeService(
 
         val challenge = challengesRepository.getByIdTx(challengeUuid)
             ?: throw IllegalArgumentException("Challenge not found")
+
+        val canViewChallenge = when (actingUser.role) {
+            UserRole.SUPERADMIN -> true
+            UserRole.ADMIN -> {
+                val adminClubIds = clubsRepository.getClubIdsForAdminTx(actingUser.id)
+                adminClubIds.any { clubId ->
+                    challengesRepository.isChallengeAvailableForClubTx(challenge.id, clubId)
+                }
+            }
+            UserRole.COACH -> {
+                val coachedClubIds = teamsRepository.getTeamsForUserTx(actingUser.id)
+                    .map { it.clubId }
+                    .toSet()
+                coachedClubIds.any { clubId ->
+                    challengesRepository.isChallengeAvailableForClubTx(challenge.id, clubId)
+                }
+            }
+            UserRole.ATHLETE, UserRole.PARENT -> false
+        }
+
+        if (!canViewChallenge) {
+            throw IllegalArgumentException("User may only view challenge demo videos for assigned clubs")
+        }
 
         val objectKey = challenge.demoVideoObjectKey
             ?: throw IllegalArgumentException("Challenge has no demo video")
@@ -1108,22 +1195,12 @@ class ChallengeService(
 
         val groupedByAthlete = filteredSubmissions.groupBy { it.userId }
 
-        val lowerIsBetter = isLowerScoreBetter(challenge.scoringType)
-
         val entriesWithoutRank = groupedByAthlete.mapNotNull { (athleteId, submissions) ->
             val athlete = usersById[athleteId] ?: return@mapNotNull null
 
-            val bestSubmission = if (lowerIsBetter) {
-                submissions.minWithOrNull(
-                    compareBy<ChallengeSubmission> { it.score }
-                        .thenBy { it.createdAt }
-                )
-            } else {
-                submissions.maxWithOrNull(
-                    compareBy<ChallengeSubmission> { it.score }
-                        .thenByDescending { it.createdAt }
-                )
-            } ?: submissions.first()
+            val bestSubmission = submissions.sortedWith(bestChallengeSubmissionComparator(challenge.scoringType))
+                .firstOrNull()
+                ?: submissions.first()
 
             val team = teamsById[bestSubmission.teamId] ?: return@mapNotNull null
 
@@ -1139,22 +1216,9 @@ class ChallengeService(
                 validationStatus = bestSubmission.validationStatus,
                 submittedAt = bestSubmission.createdAt
             )
-        }.sortedWith(
-            compareByDescending<FullLeaderboardEntryResponse> { it.bestScore }
-                .thenBy { it.submittedAt }
-        )
-
-        val sortedEntries = if (lowerIsBetter) {
-            entriesWithoutRank.sortedWith(
-                compareBy<FullLeaderboardEntryResponse> { it.bestScore }
-                    .thenBy { it.submittedAt }
-            )
-        } else {
-            entriesWithoutRank.sortedWith(
-                compareByDescending<FullLeaderboardEntryResponse> { it.bestScore }
-                    .thenBy { it.submittedAt }
-            )
         }
+
+        val sortedEntries = entriesWithoutRank.sortedWith(fullLeaderboardEntryComparator(challenge.scoringType))
 
         CurrentChallengeLeaderboardResponse(
             challenge = challenge.toChallengeSummaryResponse(),
@@ -1169,8 +1233,40 @@ class ChallengeService(
         )
     }
 
-    private fun isLowerScoreBetter(scoringType: String): Boolean {
-        return scoringType == "TIME" || scoringType == "LOW_SCORE"
+    private fun bestSubmissionComparator(
+        scoringType: ChallengeScoringType
+    ): Comparator<Pair<ChallengeSubmission, User>> {
+        return if (scoringType.higherIsBetter) {
+            compareByDescending<Pair<ChallengeSubmission, User>> { it.first.score }
+                .thenBy { it.first.createdAt }
+        } else {
+            compareBy<Pair<ChallengeSubmission, User>> { it.first.score }
+                .thenBy { it.first.createdAt }
+        }
+    }
+
+    private fun bestChallengeSubmissionComparator(
+        scoringType: ChallengeScoringType
+    ): Comparator<ChallengeSubmission> {
+        return if (scoringType.higherIsBetter) {
+            compareByDescending<ChallengeSubmission> { it.score }
+                .thenBy { it.createdAt }
+        } else {
+            compareBy<ChallengeSubmission> { it.score }
+                .thenBy { it.createdAt }
+        }
+    }
+
+    private fun fullLeaderboardEntryComparator(
+        scoringType: ChallengeScoringType
+    ): Comparator<FullLeaderboardEntryResponse> {
+        return if (scoringType.higherIsBetter) {
+            compareByDescending<FullLeaderboardEntryResponse> { it.bestScore }
+                .thenBy { it.submittedAt }
+        } else {
+            compareBy<FullLeaderboardEntryResponse> { it.bestScore }
+                .thenBy { it.submittedAt }
+        }
     }
 
     private suspend fun Challenge.toChallengeSummaryResponse(): ChallengeSummaryResponse {

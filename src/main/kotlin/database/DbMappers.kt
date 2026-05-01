@@ -1,6 +1,7 @@
 package com.provingground.database
 
 import com.provingground.database.tables.ChallengeDemoUploadIntentsTable
+import com.provingground.database.tables.ChallengeScoringType
 import com.provingground.database.tables.ChallengeSubmissionsTable
 import com.provingground.database.tables.ChallengeToClubsTable
 import com.provingground.database.tables.ChallengeUploadIntentsTable
@@ -84,7 +85,7 @@ fun ResultRow.toChallenge(): Challenge {
         title = this[ChallengesTable.title],
         description = this[ChallengesTable.description],
         demoVideoObjectKey = this[ChallengesTable.demoVideoObjectKey],
-        scoringType = this[ChallengesTable.scoringType],
+        scoringType = ChallengeScoringType.fromStoredValue(this[ChallengesTable.scoringType]),
         difficulty = this[ChallengesTable.difficulty],
         startTime = this[ChallengesTable.startTime],
         endTime = this[ChallengesTable.endTime],

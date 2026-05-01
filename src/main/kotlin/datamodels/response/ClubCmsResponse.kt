@@ -1,6 +1,7 @@
 package com.provingground.datamodels.response
 
 import com.provingground.database.tables.SubscriptionType
+import com.provingground.database.tables.UserRole
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -59,4 +60,26 @@ data class GetClubLogoUrlResponse(
     val clubId: String,
     val logoUrl: String,
     val expiresAt: Long
+)
+
+@Serializable
+data class CreateClubAdminRequest(
+    val name: String,
+    val username: String,
+    val password: String,
+    val email: String,
+    val phone: String,
+    val dob: String
+)
+
+@Serializable
+data class ClubAdminResponse(
+    val id: String,
+    val clubId: String,
+    val name: String,
+    val username: String,
+    val email: String,
+    val phone: String,
+    val role: UserRole,
+    val createdAt: Long
 )

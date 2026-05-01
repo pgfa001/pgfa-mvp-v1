@@ -2,6 +2,7 @@ package com.provingground.database.repositories
 
 import com.provingground.database.dbQuery
 import com.provingground.database.tables.ChallengeDemoUploadIntentsTable
+import com.provingground.database.tables.ChallengeScoringType
 import com.provingground.database.tables.ChallengeSubmissionsTable
 import com.provingground.database.tables.ChallengeToClubsTable
 import com.provingground.database.tables.ChallengeUploadIntentsTable
@@ -34,7 +35,7 @@ class ChallengesRepository {
             it[title] = challenge.title
             it[description] = challenge.description
             it[demoVideoObjectKey] = challenge.demoVideoObjectKey
-            it[scoringType] = challenge.scoringType
+            it[scoringType] = challenge.scoringType.name
             it[difficulty] = challenge.difficulty
             it[startTime] = challenge.startTime
             it[endTime] = challenge.endTime
@@ -61,6 +62,16 @@ class ChallengesRepository {
 
     fun getAllTx(): List<Challenge> {
         return ChallengesTable.selectAll().map { it.toChallenge() }
+    }
+
+    fun getByClubIdsTx(clubIds: Collection<UUID>): List<Challenge> {
+        if (clubIds.isEmpty()) return emptyList()
+
+        return (ChallengesTable innerJoin ChallengeToClubsTable)
+            .selectAll()
+            .where { ChallengeToClubsTable.clubId inList clubIds }
+            .map { it.toChallenge() }
+            .distinctBy { it.id }
     }
 
     suspend fun getAll(): List<Challenge> = dbQuery {
@@ -122,7 +133,7 @@ class ChallengesRepository {
             it[title] = request.title
             it[description] = request.description
             it[demoVideoObjectKey] = request.demoVideoObjectKey
-            it[scoringType] = request.scoringType
+            it[scoringType] = request.scoringType.name
             it[difficulty] = request.difficulty
             it[startTime] = request.startTime
             it[endTime] = request.endTime
@@ -303,7 +314,8 @@ class ChallengesRepository {
 
     fun getBestSubmissionsForChallengeAndTeamTx(
         challengeId: UUID,
-        teamId: UUID
+        teamId: UUID,
+        scoringType: ChallengeScoringType
     ): List<Pair<ChallengeSubmission, User>> {
         return ChallengeSubmissionsTable
             .join(
@@ -321,11 +333,20 @@ class ChallengesRepository {
             .groupBy { (submission, _) -> submission.userId }
             .values
             .map { submissionsForUser ->
-                submissionsForUser.maxWithOrNull(
-                    compareBy<Pair<ChallengeSubmission, User>> { it.first.score }
-                        .thenBy { it.first.createdAt }
-                )!!
+                submissionsForUser.sortedWith(bestSubmissionComparator(scoringType)).first()
             }
+    }
+
+    private fun bestSubmissionComparator(
+        scoringType: ChallengeScoringType
+    ): Comparator<Pair<ChallengeSubmission, User>> {
+        return if (scoringType.higherIsBetter) {
+            compareByDescending<Pair<ChallengeSubmission, User>> { it.first.score }
+                .thenBy { it.first.createdAt }
+        } else {
+            compareBy<Pair<ChallengeSubmission, User>> { it.first.score }
+                .thenBy { it.first.createdAt }
+        }
     }
 
     fun getAllSubmissionsForChallengeAndTeamTx(
