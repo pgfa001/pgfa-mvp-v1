@@ -30,6 +30,7 @@ data class FullLeaderboardEntryResponse(
     val avatarUrl: String? = null,
     val attempts: Int,
     val bestScore: Int,
+    val bestScoreSubmissionId: String,
     val validationStatus: SubmissionValidationStatus,
     val submittedAt: Long
 )

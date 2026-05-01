@@ -1213,6 +1213,7 @@ class ChallengeService(
                 avatarUrl = athlete.avatarUrl,
                 attempts = submissions.size,
                 bestScore = bestSubmission.score,
+                bestScoreSubmissionId = bestSubmission.id.toString(),
                 validationStatus = bestSubmission.validationStatus,
                 submittedAt = bestSubmission.createdAt
             )
