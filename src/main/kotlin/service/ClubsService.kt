@@ -306,10 +306,14 @@ class ClubsService(
             throw IllegalArgumentException("Missing required query parameter: id or accessCode")
         }) ?: return null
 
+        val readUrl = if (club.logoUrl.isNotEmpty())
+            videoStorageService.createReadUrl(club.logoUrl, expiresInSeconds = 900).readUrl
+        else ""
+
         return ClubDetailsResponse(
             id = club.id.toString(),
             name = club.name,
-            logoUrl = club.logoUrl,
+            logoUrl = readUrl,
             primaryColor = club.primaryColor,
             accentColor = club.accentColor,
             subscriptionType = club.subscriptionType.name
