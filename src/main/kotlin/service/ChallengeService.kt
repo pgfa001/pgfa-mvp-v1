@@ -37,10 +37,13 @@ import com.provingground.datamodels.response.GetChallengesCmsResponse
 import com.provingground.datamodels.response.GetMyChallengeSubmissionsResponse
 import com.provingground.datamodels.response.LeaderboardEntryResponse
 import com.provingground.datamodels.response.LeaderboardScope
+import com.provingground.datamodels.response.MostImprovedAthleteEntryResponse
+import com.provingground.datamodels.response.MostImprovedAthleteResponse
 import com.provingground.datamodels.response.VerifyChallengeSubmissionResponse
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
 import java.util.UUID
+import kotlin.math.abs
 
 class ChallengeService(
     private val usersRepository: UsersRepository,
@@ -284,6 +287,104 @@ class ChallengeService(
                         createdAt = submission.createdAt
                     )
                 }
+        )
+    }
+
+    suspend fun getMostImprovedAthleteForChallengeTeam(
+        actingUserId: UUID,
+        challengeId: String,
+        teamId: String
+    ): MostImprovedAthleteResponse = newSuspendedTransaction(Dispatchers.IO) {
+        val actingUser = usersRepository.getByIdTx(actingUserId)
+            ?: throw IllegalArgumentException("User not found")
+
+        if (actingUser.role != UserRole.COACH && actingUser.role != UserRole.ADMIN && actingUser.role != UserRole.SUPERADMIN) {
+            throw IllegalArgumentException("Only super admins, admins, and coaches can view most improved athletes")
+        }
+
+        val challengeUuid = try {
+            UUID.fromString(challengeId)
+        } catch (_: Exception) {
+            throw IllegalArgumentException("Invalid challengeId")
+        }
+
+        val teamUuid = try {
+            UUID.fromString(teamId)
+        } catch (_: Exception) {
+            throw IllegalArgumentException("Invalid teamId")
+        }
+
+        val challenge = challengesRepository.getByIdTx(challengeUuid)
+            ?: throw IllegalArgumentException("Challenge not found")
+
+        val team = teamsRepository.getByIdTx(teamUuid)
+            ?: throw IllegalArgumentException("Team not found")
+
+        requireChallengeAvailableForTeam(challenge, team)
+        requireCanReviewTeam(actingUser, team)
+
+        val submissions = challengesRepository
+            .getAllSubmissionsForChallengeAndTeamTx(challenge.id, team.id)
+            .groupBy { it.userId }
+            .filterValues { it.size >= 2 }
+
+        if (submissions.isEmpty()) {
+            return@newSuspendedTransaction MostImprovedAthleteResponse(
+                challengeId = challenge.id.toString(),
+                teamId = team.id.toString(),
+                athlete = null
+            )
+        }
+
+        val usersById = usersRepository.getByIdsTx(submissions.keys.toList()).associateBy { it.id }
+
+        val mostImproved = submissions.mapNotNull { (athleteId, athleteSubmissions) ->
+            val athlete = usersById[athleteId] ?: return@mapNotNull null
+            val firstSubmission = athleteSubmissions.minBy { it.createdAt }
+            val bestSubmission = athleteSubmissions
+                .sortedWith(bestChallengeSubmissionComparator(challenge.scoringType))
+                .first()
+
+            val improvement = if (challenge.scoringType.higherIsBetter) {
+                bestSubmission.score - firstSubmission.score
+            } else {
+                firstSubmission.score - bestSubmission.score
+            }
+
+            MostImprovedCandidate(
+                athlete = athlete,
+                attemptCount = athleteSubmissions.size,
+                firstSubmission = firstSubmission,
+                bestSubmission = bestSubmission,
+                improvement = improvement
+            )
+        }.maxWithOrNull(
+            compareBy<MostImprovedCandidate> { it.improvement }
+                .thenByDescending { it.bestSubmission.createdAt }
+        )
+
+        MostImprovedAthleteResponse(
+            challengeId = challenge.id.toString(),
+            teamId = team.id.toString(),
+            athlete = mostImproved?.let { candidate ->
+                MostImprovedAthleteEntryResponse(
+                    athleteId = candidate.athlete.id.toString(),
+                    athleteName = candidate.athlete.name,
+                    avatarUrl = candidate.athlete.avatarUrl,
+                    attemptCount = candidate.attemptCount,
+                    firstSubmissionId = candidate.firstSubmission.id.toString(),
+                    firstScore = candidate.firstSubmission.score,
+                    firstSubmittedAt = candidate.firstSubmission.createdAt,
+                    bestSubmissionId = candidate.bestSubmission.id.toString(),
+                    bestScore = candidate.bestSubmission.score,
+                    bestSubmittedAt = candidate.bestSubmission.createdAt,
+                    improvement = candidate.improvement,
+                    improvementPercentage = calculateImprovementPercentage(
+                        improvement = candidate.improvement,
+                        firstScore = candidate.firstSubmission.score
+                    )
+                )
+            }
         )
     }
 
@@ -1246,6 +1347,25 @@ class ChallengeService(
         }
     }
 
+    private fun requireCanReviewTeam(user: User, team: Team) {
+        when (user.role) {
+            UserRole.SUPERADMIN -> return
+            UserRole.ADMIN -> {
+                if (!clubsRepository.isUserClubAdminTx(user.id, team.clubId)) {
+                    throw IllegalArgumentException("Admin may only review teams for assigned clubs")
+                }
+            }
+            UserRole.COACH -> {
+                if (!teamsRepository.isUserOnTeamTx(user.id, team.id)) {
+                    throw IllegalArgumentException("Coach may only review teams they coach")
+                }
+            }
+            UserRole.ATHLETE, UserRole.PARENT -> {
+                throw IllegalArgumentException("Only super admins, admins, and coaches can review teams")
+            }
+        }
+    }
+
     private fun bestChallengeSubmissionComparator(
         scoringType: ChallengeScoringType
     ): Comparator<ChallengeSubmission> {
@@ -1256,6 +1376,23 @@ class ChallengeService(
             compareBy<ChallengeSubmission> { it.score }
                 .thenBy { it.createdAt }
         }
+    }
+
+    private data class MostImprovedCandidate(
+        val athlete: User,
+        val attemptCount: Int,
+        val firstSubmission: ChallengeSubmission,
+        val bestSubmission: ChallengeSubmission,
+        val improvement: Int
+    )
+
+    private fun calculateImprovementPercentage(
+        improvement: Int,
+        firstScore: Int
+    ): Double? {
+        if (firstScore == 0) return null
+
+        return improvement.toDouble() / abs(firstScore).toDouble() * 100.0
     }
 
     private fun fullLeaderboardEntryComparator(

@@ -333,10 +333,14 @@ class ClubsService(
 
             GetClubsResponse(
                 clubs = clubs.map { club ->
+                    val readUrl = if (club.logoUrl.isNotEmpty())
+                        videoStorageService.createReadUrl(club.logoUrl, expiresInSeconds = 900).readUrl
+                    else ""
+
                     ClubSummaryResponse(
                         id = club.id.toString(),
                         name = club.name,
-                        logoUrl = club.logoUrl,
+                        logoUrl = readUrl,
                         accessCode = club.accessCode,
                         primaryColor = club.primaryColor,
                         accentColor = club.accentColor,

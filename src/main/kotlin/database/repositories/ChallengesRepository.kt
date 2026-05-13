@@ -8,7 +8,6 @@ import com.provingground.database.tables.ChallengeToClubsTable
 import com.provingground.database.tables.ChallengeUploadIntentsTable
 import com.provingground.database.tables.ChallengesTable
 import com.provingground.database.tables.SubmissionValidationStatus
-import com.provingground.database.tables.TeamsToUsersTable
 import com.provingground.database.tables.UsersTable
 import com.provingground.database.toChallenge
 import com.provingground.database.toChallengeDemoUploadIntent
@@ -353,7 +352,7 @@ class ChallengesRepository {
         challengeId: UUID,
         teamId: UUID
     ): List<ChallengeSubmission> {
-        return (ChallengeSubmissionsTable innerJoin TeamsToUsersTable)
+        return ChallengeSubmissionsTable
             .selectAll()
             .where {
                 (ChallengeSubmissionsTable.challengeId eq challengeId) and

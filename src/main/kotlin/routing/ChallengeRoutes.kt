@@ -202,6 +202,39 @@ fun Route.challengeRoutes(challengeService: ChallengeService) {
                 }
             }
 
+            get("/{challengeId}/teams/{teamId}/most-improved") {
+                val principal = call.principal<JWTPrincipal>()
+                val actingUserIdString = principal?.payload?.getClaim("userId")?.asString()
+                val challengeId = call.parameters["challengeId"]
+                val teamId = call.parameters["teamId"]
+
+                if (actingUserIdString.isNullOrBlank()) {
+                    call.respond(HttpStatusCode.Unauthorized, ApiMessageResponse("Invalid token"))
+                    return@get
+                }
+
+                if (challengeId.isNullOrBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ApiMessageResponse("Missing challengeId"))
+                    return@get
+                }
+
+                if (teamId.isNullOrBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ApiMessageResponse("Missing teamId"))
+                    return@get
+                }
+
+                try {
+                    val response = challengeService.getMostImprovedAthleteForChallengeTeam(
+                        actingUserId = UUID.fromString(actingUserIdString),
+                        challengeId = challengeId,
+                        teamId = teamId
+                    )
+                    call.respond(HttpStatusCode.OK, response)
+                } catch (e: IllegalArgumentException) {
+                    call.respond(HttpStatusCode.BadRequest, ApiMessageResponse(e.message ?: "Invalid request"))
+                }
+            }
+
             get("/{challengeId}") {
                 val principal = call.principal<JWTPrincipal>()
                 val actingUserIdString = principal?.payload?.getClaim("userId")?.asString()

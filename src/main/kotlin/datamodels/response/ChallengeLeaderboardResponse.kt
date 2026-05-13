@@ -34,3 +34,26 @@ data class FullLeaderboardEntryResponse(
     val validationStatus: SubmissionValidationStatus,
     val submittedAt: Long
 )
+
+@Serializable
+data class MostImprovedAthleteResponse(
+    val challengeId: String,
+    val teamId: String,
+    val athlete: MostImprovedAthleteEntryResponse? = null
+)
+
+@Serializable
+data class MostImprovedAthleteEntryResponse(
+    val athleteId: String,
+    val athleteName: String,
+    val avatarUrl: String? = null,
+    val attemptCount: Int,
+    val firstSubmissionId: String,
+    val firstScore: Int,
+    val firstSubmittedAt: Long,
+    val bestSubmissionId: String,
+    val bestScore: Int,
+    val bestSubmittedAt: Long,
+    val improvement: Int,
+    val improvementPercentage: Double? = null
+)
