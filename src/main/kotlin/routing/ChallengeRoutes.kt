@@ -333,12 +333,20 @@ fun Route.challengeRoutes(challengeService: ChallengeService) {
                 }
 
                 val teamId = call.request.queryParameters["teamId"]
+                val limitParam = call.request.queryParameters["limit"]
+                val limit = if (limitParam.isNullOrBlank()) {
+                    null
+                } else {
+                    limitParam.toIntOrNull()
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, ApiMessageResponse("Invalid limit"))
+                }
 
                 try {
                     val response = challengeService.getChallengeReviewSubmissions(
                         actingUserId = UUID.fromString(actingUserIdString),
                         challengeId = challengeId,
-                        teamId = teamId
+                        teamId = teamId,
+                        limit = limit
                     )
                     call.respond(HttpStatusCode.OK, response)
                 } catch (e: IllegalArgumentException) {

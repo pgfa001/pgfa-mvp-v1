@@ -167,7 +167,8 @@ class ChallengeService(
     suspend fun getChallengeReviewSubmissions(
         actingUserId: UUID,
         challengeId: String,
-        teamId: String?
+        teamId: String?,
+        limit: Int? = null
     ): GetChallengeReviewSubmissionsResponse = newSuspendedTransaction(Dispatchers.IO) {
         val actingUser = usersRepository.getByIdTx(actingUserId)
             ?: throw IllegalArgumentException("User not found")
@@ -264,12 +265,21 @@ class ChallengeService(
         val usersById = usersRepository.getByIdsTx(athleteIds).associateBy { it.id }
         val teamsById = teamsRepository.getByIdsTx(teamIds).associateBy { it.id }
 
+        if (limit != null && limit <= 0) {
+            throw IllegalArgumentException("limit must be greater than 0")
+        }
+
+        val rankedSubmissions = submissions
+            .sortedWith(bestChallengeSubmissionComparator(challenge.scoringType))
+            .let { sortedSubmissions ->
+                if (limit == null) sortedSubmissions else sortedSubmissions.take(limit)
+            }
+
         GetChallengeReviewSubmissionsResponse(
             challengeId = challenge.id.toString(),
             challengeTitle = challenge.title,
-            submissions = submissions
-                .sortedByDescending { it.createdAt }
-                .map { submission ->
+            submissions = rankedSubmissions
+                .mapIndexed { index, submission ->
                     val athlete = usersById[submission.userId]
                         ?: throw IllegalStateException("Athlete not found for submission ${submission.id}")
 
@@ -277,6 +287,7 @@ class ChallengeService(
                         ?: throw IllegalStateException("Team not found for submission ${submission.id}")
 
                     ChallengeReviewSubmissionItemResponse(
+                        rank = index + 1,
                         submissionId = submission.id.toString(),
                         athleteId = athlete.id.toString(),
                         athleteName = athlete.name,

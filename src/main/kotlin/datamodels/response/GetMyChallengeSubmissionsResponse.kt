@@ -24,6 +24,7 @@ data class ChallengeSubmissionResponse(
 
 @Serializable
 data class ChallengeReviewSubmissionItemResponse(
+    val rank: Int,
     val submissionId: String,
     val athleteId: String,
     val athleteName: String,
